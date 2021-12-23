@@ -20,7 +20,7 @@ class TN(nn.Module):
         return y
 
 
-class TBN(nn.Module):  # tdBN+PN
+class TBN(nn.Module):    # tdBN+PN
     def __init__(self, num_features, eps=1e-5, momentum=0.1):
         super(TBN, self).__init__()
         self.bn = nn.BatchNorm3d(num_features)
@@ -30,11 +30,11 @@ class TBN(nn.Module):  # tdBN+PN
         y = input.transpose(1, 2).contiguous()  # N T C H W ,  N C T H W
         y = self.bn(y)
         y = y.contiguous().transpose(1, 2)
-
+        
         y = y.transpose(0, 1).contiguous()  # NTCHW  TNCHW
         y = y * self.p
         y = y.contiguous().transpose(0, 1)  # TNCHW  NTCHW
-
+        
         return y
 
 
@@ -65,6 +65,23 @@ class TTBN(nn.Module):
         y = self.bn2(y)
         return y.contiguous().transpose(1, 2)  # N C T H W -> N T C H W
 
+class BNTT(nn.Module):
+    def __init__(self, out_plane, eps=1e-5, momentum=0.1):
+        super(BNTT, self).__init__()
+        self.bn = nn.ModuleList([nn.BatchNorm2d(out_plane) for i in range(6)])
+
+    def forward(self, x):
+        y = x[:, 0, :, :, :]
+        y = self.bn[0](y).unsqueeze(0)
+        z = y.contiguous().transpose(0, 1)
+        for i in range(1, 6):
+            y = x[:, i, :, :, :]
+            y = self.bn[i](y).unsqueeze(0)
+            z = torch.cat((z, y.contiguous().transpose(0, 1)),1)
+        return z
+    
+    
+    
 
 class TensorNormalization(nn.Module):
     def __init__(self, mean, std):
@@ -149,7 +166,39 @@ class TBNLayer(nn.Module):
         y = self.fwd(input)
         y = self.bn(y)
         return y
+    
+class BNTTLayer(nn.Module):  # 
+    def __init__(self, in_plane, out_plane, kernel_size, stride, padding):
+        super(BNTTLayer, self).__init__()
+        self.fwd = SeqToANNContainer(
+            nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
+        )
+        self.bn = BNTT(out_plane)
+        # self.act = LIFSpike()
 
+    def forward(self, x):
+        y = self.fwd(x)
+        y = self.bn(y)
+        # x = self.act(x)
+        return y 
+    
+
+class TNLayer(nn.Module):  # baseline+TN
+    def __init__(self, in_plane, out_plane, kernel_size, stride, padding):
+        super(TNLayer, self).__init__()
+        self.fwd = SeqToANNContainer(
+            nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
+        )
+        self.bn = TN(out_plane)
+        # self.act = LIFSpike()
+
+    def forward(self, x):
+        y = self.fwd(x)
+        y = self.bn(y)
+        # x = self.act(x)
+        return y
+    
+    
 
 class Layer(nn.Module):  # baseline
     def __init__(self, in_plane, out_plane, kernel_size, stride, padding):
@@ -163,8 +212,8 @@ class Layer(nn.Module):  # baseline
     def forward(self, x):
         x = self.fwd(x)
         # x = self.act(x)
-        return x
-
+        return x 
+    
 
 class TNLayer(nn.Module):  # baseline+TN
     def __init__(self, in_plane, out_plane, kernel_size, stride, padding):
@@ -196,38 +245,35 @@ class APLayer(nn.Module):
         return x
 
 
+
 class Dropout(nn.Module):
     def __init__(self, p=0.5):
         super().__init__()
         assert 0 <= p < 1
         self.p = p
         self.mask = None
-
     def extra_repr(self):
         return f'p={self.p}'
-
     def reset(self):
         self.mask = None
-
     def create_mask(self, x: torch.Tensor):
-        self.mask = (F.dropout(torch.ones_like(x), p=self.p, training=True) > 0).float()
-
-    #     def forward(self, x: torch.Tensor):
-    #         self.init()
-    #         print(self.mask)
-    #         if self.training:
-    #             if self.mask is None:
-    #                 self.create_mask(x)
-    #             print(self.mask)
-    #             return x * self.mask
-    #         else:
-    #             return x
+        self.mask = (F.dropout(torch.ones_like(x), p=self.p, training=True)>0).float()
+#     def forward(self, x: torch.Tensor):
+#         self.init()
+#         print(self.mask)
+#         if self.training:
+#             if self.mask is None:
+#                 self.create_mask(x)
+#             print(self.mask)
+#             return x * self.mask
+#         else:
+#             return x
     def forward(self, x_seq: torch.Tensor):
         self.reset()
         if self.training:
             y = x_seq.transpose(0, 1).contiguous()  # N T C H W -> T N C H W
             if self.mask is None:
-                self.create_mask(y[0])
+                self.create_mask(y[0]) 
             y = y * self.mask
             return y.contiguous().transpose(0, 1)
         else:

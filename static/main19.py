@@ -170,9 +170,6 @@ if __name__ == '__main__':
 
         loss, acc = train(parallel_model, device, train_loader, criterion, optimizer, epoch, args)
         logger.info('Epoch:[{}/{}]\t loss={:.5f}\t acc={:.3f}'.format(epoch, args.epochs, loss, acc))
-        # for name, param in model.named_parameters():
-        #     writer.add_histogram(name +'_grad', param.grad, epoch)
-        #     writer.add_histogram(name +'_data', param, epoch)
         writer.add_scalar('train_loss', loss, epoch)
         writer.add_scalar('train_acc', acc, epoch)
         scheduler.step()

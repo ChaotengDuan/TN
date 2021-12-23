@@ -11,7 +11,6 @@ from models.VGG_models import *
 import data_loaders
 from functions import TET_loss, seed_all, get_logger
 from torch.utils.tensorboard import SummaryWriter
-
 # os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3,12"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -73,12 +72,14 @@ parser.add_argument('--lamb',
                     metavar='N',
                     help='adjust the norm factor to avoid outlier (default: 0.0)')
 parser.add_argument('-out_dir', default='./logs/', type=str, help='root dir for saving logs and checkpoint')
-parser.add_argument('-resume', type=str, help='resume from the checkpoint path')
-parser.add_argument('-method', type=str, help='BN method')
+parser.add_argument('-resume', type=str,default='./logs/CIFAR10_VGG_tau_0.5_method_BNTT_T_6_b_128_/checkpoint_latest.pth', help='resume from the checkpoint path')
+parser.add_argument('-method', type=str, default='TN', help='BN method')
+parser.add_argument('-tau', type=float, default=0.5 ,help='tau of LIF')
+    
+
 
 args = parser.parse_args()
 print(args)
-
 
 def train(model, device, train_loader, criterion, optimizer, epoch, args):
     running_loss = 0
@@ -134,15 +135,17 @@ if __name__ == '__main__':
     test_loader = torch.utils.data.DataLoader(val_dataset, batch_size=args.batch_size,
                                               shuffle=False, num_workers=args.workers, pin_memory=True)
     if args.method == 'TN':
-        model = VGGTN()
-    elif args.method == 'TBN':
+        model = VGGTN(tau=args.tau)
+    elif  args.method == 'TBN':
         model = VGGTBN()
-    elif args.method == 'tdBN':
+    elif  args.method == 'tdBN':
         model = VGGtdBN()
-    elif args.method == 'TTBN':
+    elif  args.method == 'TTBN':
         model = VGGTTBN()
-    elif args.method == 'base':
+    elif  args.method == 'base':
         model = VGGbase()
+    elif  args.method == 'BNTT':
+        model = VGGBNTT()
     print(model)
 
     parallel_model = torch.nn.DataParallel(model)
@@ -152,13 +155,14 @@ if __name__ == '__main__':
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, eta_min=0, T_max=args.epochs)
-
+    
     start_epoch = 0
     best_acc = 0
     best_epoch = 0
     out_dir = os.path.join(args.out_dir,
-                           f'CIFAR10_VGG_method_{args.method}_T_{args.time}_b_{args.batch_size}_')
-
+                           f'CIFAR10_VGG_tau_{args.tau}_method_{args.method}_T_{args.time}_b_{args.batch_size}_')
+    
+    
     if args.resume:
         print('load resume')
         checkpoint = torch.load(args.resume, map_location='cpu')
@@ -167,19 +171,19 @@ if __name__ == '__main__':
         scheduler.load_state_dict(checkpoint['scheduler'])
         start_epoch = checkpoint['epoch'] + 1
         best_acc = checkpoint['best_acc']
-
-    logger = get_logger(f'VGGC10_method_{args.method}_.log')
+        
+    logger = get_logger(f'VGGC10_tau_{args.tau}_method_{args.method}_.log')
     logger.info('start training!')
-
+    
     writer = SummaryWriter(os.path.join(out_dir, 'logs'), purge_step=start_epoch)
-
+    
     for epoch in range(start_epoch, args.epochs):
 
         loss, acc = train(parallel_model, device, train_loader, criterion, optimizer, epoch, args)
         logger.info('Epoch:[{}/{}]\t loss={:.5f}\t acc={:.3f}'.format(epoch, args.epochs, loss, acc))
-        for name, param in model.named_parameters():
-            writer.add_histogram(name + '_grad', param.grad, epoch)
-            writer.add_histogram(name + '_data', param, epoch)
+        for name, param in model.named_parameters():    
+            writer.add_histogram(name +'_grad', param.grad, epoch)
+            writer.add_histogram(name +'_data', param, epoch)
         writer.add_scalar('train_loss', loss, epoch)
         writer.add_scalar('train_acc', acc, epoch)
         scheduler.step()
